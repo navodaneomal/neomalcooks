@@ -5,3 +5,5 @@ dist
 .vercel
 .netlify
 dist.zip
+# Release archives built for download; the repo is the source of truth.
+*.zip
