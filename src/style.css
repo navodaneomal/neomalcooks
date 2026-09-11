@@ -1,0 +1,610 @@
+/*
+ * The whole interface.
+ *
+ * Almost all of it is invisible almost all of the time: the brief's rule is
+ * that the world should be able to hold the screen alone. What exists here is a
+ * loader that grows a tulip instead of filling a bar, a code layer, text that
+ * appears and dissolves, and one small mark in a corner that opens the settings.
+ *
+ * No webfonts by design — the experience must not wait on, or fail with, a font
+ * CDN. These stacks pick a genuinely elegant serif and a real monospace on every
+ * platform this will actually be opened on.
+ */
+
+:root {
+  color-scheme: dark;
+
+  --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua',
+           Georgia, 'Times New Roman', serif;
+  --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+          'DejaVu Sans Mono', 'Liberation Mono', monospace;
+
+  --ink: #f2e8ea;
+  --ink-soft: rgba(242, 232, 234, 0.62);
+  --ink-faint: rgba(242, 232, 234, 0.34);
+  --petal: #eab8c8;
+  --petal-deep: #c86f8c;
+  --gold: #e8c58a;
+  --leaf: #8aa07a;
+  --panel: rgba(14, 11, 16, 0.82);
+  --panel-line: rgba(242, 232, 234, 0.14);
+
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --slow: cubic-bezier(0.4, 0, 0.15, 1);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #06050a;
+  overflow: hidden;
+  overscroll-behavior: none;
+  font-family: var(--serif);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+.noscript {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  text-align: center;
+  font-size: 1.15rem;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+/* --------------------------------------------------------------------------
+   The UI layer. Pointer-transparent by default so the world always receives
+   input; only actual controls opt back in.
+   -------------------------------------------------------------------------- */
+
+.ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.ui.blackout::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: #000;
+  animation: fade-in 1.2s var(--ease) forwards;
+}
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* Zero-UI mode (brief §53): everything but the world goes. */
+.ui.no-chrome .settings,
+.ui.no-chrome .whisper-layer,
+.ui.no-chrome .message-layer { opacity: 0; pointer-events: none; }
+
+.ui .settings,
+.ui .whisper-layer,
+.ui .message-layer { transition: opacity 1.2s var(--ease); }
+
+/* --------------------------------------------------------------------------
+   Loader (brief §54)
+   -------------------------------------------------------------------------- */
+
+.loader {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(120% 90% at 50% 55%, #0d0a12 0%, #050409 68%, #030205 100%);
+  pointer-events: auto;
+  transition: opacity 1.4s var(--slow);
+  z-index: 40;
+}
+.loader.gone { opacity: 0; pointer-events: none; }
+
+.loader-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.6rem;
+  padding: 0 1.5rem;
+  text-align: center;
+}
+
+.sprout {
+  width: min(26vw, 120px);
+  height: min(32vh, 150px);
+}
+.sprout svg { width: 100%; height: 100%; overflow: visible; }
+
+/* The tulip is drawn on: its stroke-dashoffset is the loading progress. */
+.sprout path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+  stroke-dasharray: 300;
+  stroke-dashoffset: calc(300 - 300 * var(--grow, 0));
+  transition: stroke-dashoffset 1.1s var(--slow), opacity 1.1s var(--ease);
+}
+.sprout .sprout-stem path { stroke: var(--leaf); }
+.sprout .sprout-leaf path { stroke: var(--leaf); opacity: 0.85; }
+.sprout .sprout-bloom path {
+  stroke: var(--petal);
+  fill: rgba(234, 184, 200, 0.10);
+  filter: drop-shadow(0 0 14px rgba(234, 184, 200, 0.35));
+}
+
+.loader-stage {
+  font-size: clamp(1.05rem, 3.4vw, 1.5rem);
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+  min-height: 1.6em;
+}
+.loader-stage.flip { animation: stage-in 0.9s var(--ease); }
+.loader-stage.final {
+  color: var(--ink);
+  font-size: clamp(1.35rem, 4.6vw, 2rem);
+  letter-spacing: 0.06em;
+}
+
+@keyframes stage-in {
+  from { opacity: 0; transform: translateY(0.5em); }
+  to   { opacity: 1; transform: none; }
+}
+
+.loader-hint {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  opacity: 0;
+  transition: opacity 1.6s var(--ease) 0.6s;
+}
+.loader-hint.show { opacity: 1; animation: breathe 3.4s ease-in-out infinite 2s; }
+
+@keyframes breathe { 0%, 100% { opacity: 0.34; } 50% { opacity: 0.8; } }
+
+/* --------------------------------------------------------------------------
+   Code (brief §08, §40)
+   -------------------------------------------------------------------------- */
+
+.code-layer {
+  position: fixed;
+  left: clamp(1rem, 5vw, 4.5rem);
+  bottom: clamp(1.5rem, 8vh, 5rem);
+  max-width: min(46ch, 82vw);
+  opacity: 0;
+  transition: opacity 1.6s var(--ease), transform 1.6s var(--slow);
+  transform: translateY(0.6rem);
+  z-index: 20;
+}
+.code-layer.show { opacity: 1; transform: none; }
+.code-layer.centre {
+  left: 50%;
+  bottom: auto;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+.code-layer.centre.show { transform: translate(-50%, -50%); }
+
+.code {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: clamp(0.62rem, 1.55vw, 0.86rem);
+  line-height: 1.85;
+  letter-spacing: 0.01em;
+  white-space: pre;
+  text-shadow: 0 0 18px rgba(232, 197, 138, 0.16);
+}
+
+.code-line {
+  opacity: 0;
+  transform: translateX(-0.35em);
+  transition: opacity 0.7s var(--ease), transform 0.7s var(--ease);
+}
+.code-line.in { opacity: 1; transform: none; }
+
+/* A caret on the last line, because it should look like it is being written. */
+.code.caret .code-line:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 0.58em;
+  height: 1.05em;
+  margin-left: 0.15em;
+  vertical-align: -0.18em;
+  background: var(--gold);
+  animation: caret 1.05s steps(1) infinite;
+}
+@keyframes caret { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+
+.t-kw      { color: #c9a2e0; }
+.t-fn      { color: var(--gold); }
+.t-arg     { color: #9fd3c7; }
+.t-num     { color: #e8a0b4; }
+.t-str     { color: #d8c08a; }
+.t-op      { color: rgba(242, 232, 234, 0.44); }
+.t-plain   { color: var(--ink-soft); }
+.t-comment { color: rgba(242, 232, 234, 0.28); font-style: italic; }
+
+/* --------------------------------------------------------------------------
+   Titles, messages, whispers
+   -------------------------------------------------------------------------- */
+
+.title-layer {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 30;
+}
+
+.title {
+  position: absolute;
+  padding: 0 1.5rem;
+  text-align: center;
+  font-size: clamp(1.5rem, 5.2vw, 2.6rem);
+  letter-spacing: 0.12em;
+  color: var(--ink);
+  opacity: 0;
+  transform: translateY(0.4em);
+  transition: opacity 1.6s var(--ease), transform 2.4s var(--slow), letter-spacing 3s var(--slow);
+  text-shadow: 0 0 40px rgba(255, 236, 220, 0.28);
+}
+.title.in { opacity: 1; transform: none; letter-spacing: 0.2em; }
+.title.mono { font-family: var(--mono); font-size: clamp(1.05rem, 3.6vw, 1.7rem); }
+.title.soft { color: var(--ink-soft); letter-spacing: 0.04em; font-style: italic; }
+.title.soft.in { letter-spacing: 0.07em; }
+
+.message-layer, .whisper-layer, .cursor-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  pointer-events: none;
+}
+
+/*
+ * A message from a tulip. It rises and dissolves like the particles it is
+ * meant to be made of — never a box, never a notification.
+ */
+.petal-message {
+  position: absolute;
+  transform: translate(-50%, -50%) translateY(0.8em);
+  max-width: 22ch;
+  text-align: center;
+  font-size: clamp(0.95rem, 2.6vw, 1.2rem);
+  font-style: italic;
+  line-height: 1.5;
+  color: rgba(255, 240, 235, 0.9);
+  text-shadow: 0 0 26px rgba(234, 184, 200, 0.55), 0 0 60px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transition: opacity 2.2s var(--ease), transform 5s var(--slow);
+}
+.petal-message.in { opacity: 1; transform: translate(-50%, -50%) translateY(-1.6em); }
+
+/* A discovery. Tiny, dim, and gone — not an achievement. */
+.whisper {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(3rem, 12vh, 7rem);
+  transform: translateX(-50%) translateY(0.6em);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink-faint);
+  opacity: 0;
+  transition: opacity 2.4s var(--ease), transform 3.4s var(--slow);
+}
+.whisper.in { opacity: 1; transform: translateX(-50%); }
+
+/* --------------------------------------------------------------------------
+   The fourth wall (brief §41)
+   -------------------------------------------------------------------------- */
+
+.cursor-layer { opacity: 0; transition: opacity 0.8s var(--ease); z-index: 45; }
+.cursor-layer.show { opacity: 1; }
+
+.fake-cursor {
+  position: absolute;
+  width: 14px;
+  height: 20px;
+  margin: -2px 0 0 -2px;
+  background: var(--ink);
+  clip-path: polygon(0 0, 0 16px, 4px 12px, 7px 19px, 10px 18px, 7px 11px, 12px 11px);
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.9));
+  transition: transform 0.18s var(--ease);
+}
+.fake-cursor.click { transform: scale(0.82); }
+
+.run-again {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(0.96);
+  padding: 0.85em 2.2em;
+  border: 1px solid var(--panel-line);
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.28em;
+  color: var(--ink-soft);
+  background: rgba(255, 255, 255, 0.03);
+  opacity: 0;
+  transition: opacity 1s var(--ease), transform 0.3s var(--ease),
+              background 0.3s var(--ease), color 0.3s var(--ease);
+}
+.run-again.in { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.run-again.pressed {
+  background: rgba(234, 184, 200, 0.16);
+  color: var(--ink);
+  transform: translate(-50%, -50%) scale(0.985);
+}
+
+/* --------------------------------------------------------------------------
+   Settings (brief §49)
+   -------------------------------------------------------------------------- */
+
+.settings { position: fixed; right: 0; top: 0; z-index: 35; }
+
+.settings-toggle {
+  position: fixed;
+  right: max(0.9rem, env(safe-area-inset-right));
+  top: max(0.9rem, env(safe-area-inset-top));
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(10, 8, 12, 0.35);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0.34;
+  transition: opacity 0.4s var(--ease), background 0.4s var(--ease);
+}
+.settings-toggle:hover,
+.settings-toggle:focus-visible { opacity: 1; background: rgba(10, 8, 12, 0.6); }
+.settings.open .settings-toggle { opacity: 1; }
+.settings-toggle svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: var(--petal);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.settings-panel {
+  position: fixed;
+  right: max(0.75rem, env(safe-area-inset-right));
+  top: calc(max(0.9rem, env(safe-area-inset-top)) + 52px);
+  width: min(21rem, calc(100vw - 1.5rem));
+  max-height: min(76vh, 44rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1.1rem 1.25rem 1.35rem;
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  background: var(--panel);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  transform: translateY(-0.5rem) scale(0.985);
+  transform-origin: top right;
+  pointer-events: none;
+  transition: opacity 0.32s var(--ease), transform 0.32s var(--ease);
+}
+.settings.open .settings-panel { opacity: 1; transform: none; pointer-events: auto; }
+
+.settings-panel section { margin-bottom: 1.1rem; }
+.settings-panel section:last-of-type { margin-bottom: 0.4rem; }
+
+.settings-panel h2 {
+  margin: 0 0 0.55rem;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 400;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.settings-panel .row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  min-height: 2.1rem;
+}
+.settings-panel .row label {
+  font-size: 0.94rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.settings-panel .row .value {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink-faint);
+  text-align: right;
+  min-width: 3.4em;
+}
+.settings-panel .row input[type='range'] { grid-column: 1 / -1; }
+
+/* Controls */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type='range']::-webkit-slider-runnable-track {
+  height: 2px;
+  background: rgba(242, 232, 234, 0.2);
+  border-radius: 2px;
+}
+input[type='range']::-moz-range-track {
+  height: 2px;
+  background: rgba(242, 232, 234, 0.2);
+  border-radius: 2px;
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -5.5px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--petal);
+  box-shadow: 0 0 12px rgba(234, 184, 200, 0.5);
+}
+input[type='range']::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--petal);
+  box-shadow: 0 0 12px rgba(234, 184, 200, 0.5);
+}
+
+input.switch {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  width: 38px;
+  height: 21px;
+  margin: 0;
+  border-radius: 11px;
+  background: rgba(242, 232, 234, 0.14);
+  cursor: pointer;
+  transition: background 0.28s var(--ease);
+}
+input.switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--ink-soft);
+  transition: transform 0.28s var(--ease), background 0.28s var(--ease);
+}
+input.switch:checked { background: rgba(234, 184, 200, 0.42); }
+input.switch:checked::after { transform: translateX(17px); background: var(--petal); }
+
+select {
+  padding: 0.34em 0.6em;
+  border: 1px solid var(--panel-line);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--ink-soft);
+  font-family: var(--serif);
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+input.file {
+  grid-column: 1 / -1;
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+input.file::file-selector-button {
+  margin-right: 0.7em;
+  padding: 0.35em 0.9em;
+  border: 1px solid var(--panel-line);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.text-button {
+  padding: 0.3em 0.75em;
+  border: 1px solid var(--panel-line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-family: var(--serif);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.25s var(--ease), color 0.25s var(--ease);
+}
+.text-button:hover:not(:disabled) { background: rgba(234, 184, 200, 0.12); color: var(--ink); }
+.text-button:disabled { opacity: 0.4; cursor: default; }
+
+.diagnostics {
+  margin-top: 0.9rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--panel-line);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  line-height: 1.7;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  word-spacing: 0.1em;
+}
+
+/* Focus visibility, without a focus ring on every mouse click. */
+:focus-visible { outline: 1px solid var(--petal); outline-offset: 3px; }
+
+/* --------------------------------------------------------------------------
+   Reduced motion: honour the OS setting for the interface itself. The world's
+   own motion is handled in the engine, where it can be tapered rather than
+   stopped dead.
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .loader-stage.flip,
+  .loader-hint.show { animation: none; }
+  .code.caret .code-line:last-child::after { animation: none; opacity: 1; }
+  .title, .petal-message, .whisper, .code-line { transition-duration: 0.35s; }
+}
+
+/* Phones: keep the panel reachable and the type legible. */
+@media (max-width: 480px) {
+  .settings-panel {
+    left: max(0.6rem, env(safe-area-inset-left));
+    right: max(0.6rem, env(safe-area-inset-right));
+    width: auto;
+    max-height: 68vh;
+  }
+  .code-layer { left: 1rem; bottom: 1.4rem; max-width: calc(100vw - 2rem); }
+}
+
+/* Short landscape windows: pull the code out of the way of the horizon. */
+@media (max-height: 460px) {
+  .code-layer { bottom: 0.8rem; }
+  .code { font-size: 0.6rem; line-height: 1.6; }
+  .whisper { bottom: 1.4rem; }
+}

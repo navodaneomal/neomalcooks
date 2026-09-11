@@ -1,0 +1,27 @@
+{
+  "name": "tulip-garden",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173",
+    "typecheck": "tsc --noEmit",
+    "check": "node tools/check.mjs"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "playwright": "^1.63.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  },
+  "description": "A living tulip garden, grown from code. An interactive cinematic experience.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}
