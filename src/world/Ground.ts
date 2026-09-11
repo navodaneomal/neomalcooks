@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLSL_TERRAIN } from './Terrain';
 import { GLSL_HASH, GLSL_NOISE, GLSL_COLOR, GLSL_WIND, GLSL_LIGHTING, GLSL_ATMOSPHERE } from '../shaders/common';
 import { GLSL_INFLUENCE, GLSL_WAVE } from '../core/WorldUniforms';
+import { GLSL_SHADOW } from '../core/SunShadow';
 import type { WorldUniforms } from '../core/WorldUniforms';
 import type { QualitySettings } from '../core/Quality';
 import { paletteUniformArrays, HUE_COUNT } from './Palette';
@@ -80,6 +81,7 @@ ${GLSL_INFLUENCE}
 ${GLSL_WAVE}
 ${GLSL_LIGHTING}
 ${GLSL_ATMOSPHERE}
+${GLSL_SHADOW}
 
 /**
  * The same rosette motif the CPU uses to place tulips (see TulipField).
@@ -211,7 +213,17 @@ void main() {
 
   base *= mix(1.0, 0.78, uWetness);
 
+  // Shadow attenuates the *direct* term only; ambient still reaches the ground
+  // inside a shadow, which is what keeps it looking like shade rather than a
+  // hole cut in the field.
+  float sunVis = sunShadow(vWorld);
   vec3 lit = organicLighting(n, viewDir, base, 0.12, 0.35);
+  float ndl = clamp(dot(n, uSunDir), 0.0, 1.0);
+  lit -= base * uSunColor * uSunIntensity * ndl * (1.0 - sunVis) * 0.96;
+  // Shade also loses some sky: a surface in shadow sees less of the dome, not
+  // just less of the sun. Without this the shadow reads as a flat filter
+  // rather than as shade.
+  lit *= mix(1.0, 0.84, 1.0 - sunVis);
 
   // Wet ground turns specular and reflective.
   if (uWetness > 0.01) {

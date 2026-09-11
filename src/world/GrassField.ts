@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLSL_HASH, GLSL_NOISE, GLSL_COLOR, GLSL_ROTATE, GLSL_WIND, GLSL_LIGHTING, GLSL_ATMOSPHERE } from '../shaders/common';
 import { GLSL_INFLUENCE, GLSL_WAVE } from '../core/WorldUniforms';
+import { GLSL_SHADOW } from '../core/SunShadow';
 import type { WorldUniforms } from '../core/WorldUniforms';
 import type { QualitySettings } from '../core/Quality';
 import { GLSL_TERRAIN } from './Terrain';
@@ -171,6 +172,7 @@ ${GLSL_NOISE}
 ${GLSL_COLOR}
 ${GLSL_LIGHTING}
 ${GLSL_ATMOSPHERE}
+${GLSL_SHADOW}
 
 void main() {
   if (vFade < 0.01) discard;
@@ -179,7 +181,11 @@ void main() {
   if (!gl_FrontFacing) n = -n;
   vec3 viewDir = normalize(cameraPosition - vWorld);
 
+  float shade = sunShadow(vWorld);
   vec3 lit = organicLighting(n, viewDir, vColor, 0.75, 0.6);
+  lit -= vColor * uSunColor * uSunIntensity * clamp(dot(n, uSunDir), 0.0, 1.0)
+       * (1.0 - shade) * 0.94;
+  lit *= mix(1.0, 0.86, 1.0 - shade);
   lit += vColor * rimTerm(n, viewDir, 3.0) * 0.22;
   lit += uGlowTint * vGlow * 0.6;
   lit += uSunColor * uNight * pow(clamp(n.y, 0.0, 1.0), 4.0) * 0.10;

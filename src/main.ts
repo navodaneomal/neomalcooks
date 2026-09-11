@@ -163,7 +163,7 @@ bus.on('event:rare', ({ id }) => {
 // ---------------------------------------------------------------------------
 
 let zeroUi = false;
-const settings = new Settings(uiRoot, quality, audio, memory, day, world, heart, weather, {
+const settings = new Settings(uiRoot, quality, engine, audio, memory, day, world, heart, weather, {
   onReducedMotion: (v) => camera.setReducedMotion(v),
   onZeroUi: (v) => {
     zeroUi = v;
@@ -245,6 +245,26 @@ engine.onUpdate((dt, t) => {
   const pondDist = Math.hypot(dancer.position.x - POND.x, dancer.position.z - POND.z);
   dancer.updateReflection(dt, POND_WATER_Y, clamp01(1 - (pondDist - POND.radius * 0.4) / 14));
 
+  // --- Shadow ----------------------------------------------------------------
+  // Fitted to her, because she is what it is for. The map only covers a box a
+  // few metres across, which is why it can afford to be sharp.
+  if (engine.shadow.enabled) {
+    dancer.centre(herPos);
+    engine.shadow.fit(herPos, world.uniforms.lighting.uSunDir.value as THREE.Vector3);
+    const su = world.uniforms.shadow;
+    su.uShadowMap.value = engine.shadow.target.texture;
+    (su.uShadowMatrix.value as THREE.Matrix4).copy(engine.shadow.matrix);
+    su.uShadowTexel.value = 1 / engine.shadow.target.width;
+    // Moonlight casts a far softer shadow than the sun does.
+    su.uShadowEnabled.value = dancer.reveal > 0.15 ? 1 : 0;
+    su.uShadowStrength.value = 0.85 * (1 - day.night * 0.55) * clamp01(dancer.reveal);
+  } else if (world.uniforms.shadow.uShadowEnabled.value !== 0) {
+    // Shadows just went off — a step down in tier, or the settings toggle. The
+    // map stops being redrawn, so leaving the flag up would paint a frozen
+    // shadow on the ground wherever she happened to be standing.
+    world.uniforms.shadow.uShadowEnabled.value = 0;
+  }
+
   // --- Camera and world -----------------------------------------------------
   camera.update(dt, t);
   dancer.headPosition(herPos);
@@ -322,6 +342,17 @@ document.addEventListener('visibilitychange', () => {
   interaction, events,
   stats: () => world.tulips.stats(),
   bench: () => director.bench(),
+  // Art-direction bench: place a hero tulip at a chosen openness.
+  hero: (open: number, glow = 1, filaments = false, scale = 1.6) => {
+    director.bench();
+    dancer.revealTarget = 0;
+    dancer.reveal = 0;
+    for (const slot of world.hero.slots) slot.active = false;
+    const i = world.hero.spawn({ x: 0, z: 0, scale, open, glow, core: 0.9, instant: true });
+    if (filaments) { world.filaments.begin(0, 0, 0, scale); world.filaments.complete(); }
+    else world.filaments.dismiss();
+    return i;
+  },
   preview: (shot: { hour: number; cam: number[]; at: number[]; tier?: string }) => {
     if (shot.tier && shot.tier !== quality.tier) world.setTier(shot.tier as TierName);
     director.bench();
@@ -336,6 +367,8 @@ document.addEventListener('visibilitychange', () => {
     chunks: world.tulips.stats().chunks,
     lod: world.tulips.lodCounts(),
     hour: +(day.dayT * 24).toFixed(2),
+    renderScale: +engine.renderScale.toFixed(2),
+    shadows: engine.shadow.enabled,
     night: +day.night.toFixed(3),
     act: director.act,
     weather: weather.label(),

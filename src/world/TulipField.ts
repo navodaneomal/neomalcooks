@@ -89,6 +89,8 @@ export class TulipField {
     this.settings = settings;
     const rng = makeRandom(seed);
 
+    this.lodNear = settings.lodNear;
+    this.lodFar = settings.lodFar;
     this.baseGeos = {
       high: buildTulipGeometry('high', settings.petalSegments),
       mid: buildTulipGeometry('mid', settings.petalSegments),
@@ -459,14 +461,21 @@ export class TulipField {
   // Runtime
   // -------------------------------------------------------------------------
 
-  /** Distances at which chunks step down a level of detail. */
+  /** Distances at which chunks step down a level of detail, set by the tier. */
   private lodNear = 34;
   private lodFar = 86;
+  /**
+   * Hysteresis band. A chunk sitting exactly on a threshold would otherwise
+   * flip level every time the camera breathes, and a chunk of three thousand
+   * flowers changing detail twice a second is far more visible than the detail
+   * change itself. Stepping down and stepping back up use different distances,
+   * so a chunk has to genuinely move before it switches.
+   */
+  private lodHysteresis = 7;
 
   update(camera: THREE.Camera): void {
     const cam = camera.getWorldPosition(this.tmpV);
-    const near = this.lodNear;
-    const far = this.lodFar;
+    const h = this.lodHysteresis;
 
     for (let i = 0; i < this.chunks.length; i++) {
       const ch = this.chunks[i];
@@ -474,6 +483,10 @@ export class TulipField {
       const dz = ch.center.z - cam.z;
       const dy = ch.center.y - cam.y;
       const dist = Math.sqrt(dx * dx + dz * dz + dy * dy) - ch.radius;
+
+      // Thresholds widen in whichever direction would keep the current level.
+      const near = ch.lod === 'high' ? this.lodNear + h : this.lodNear;
+      const far = ch.lod === 'low' ? this.lodFar : this.lodFar + h;
 
       const lod: TulipLod = dist < near ? 'high' : dist < far ? 'mid' : 'low';
       if (lod !== ch.lod) {

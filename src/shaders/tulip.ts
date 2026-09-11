@@ -1,5 +1,6 @@
 import { GLSL_HASH, GLSL_NOISE, GLSL_COLOR, GLSL_ROTATE, GLSL_WIND, GLSL_LIGHTING, GLSL_ATMOSPHERE } from './common';
 import { GLSL_INFLUENCE, GLSL_WAVE } from '../core/WorldUniforms';
+import { GLSL_SHADOW } from '../core/SunShadow';
 import { GLSL_TULIP_CONST } from '../world/TulipGeometry';
 import { HUE_COUNT } from '../world/Palette';
 
@@ -364,6 +365,7 @@ ${GLSL_NOISE}
 ${GLSL_COLOR}
 ${GLSL_LIGHTING}
 ${GLSL_ATMOSPHERE}
+${GLSL_SHADOW}
 
 void main() {
   vec3 viewDir = normalize(cameraPosition - vWorld);
@@ -386,7 +388,11 @@ void main() {
     albedo += uGlowTint * veins * vGlow * 0.30 * uMagic;
   }
 
+  float shade = sunShadow(vWorld);
   vec3 lit = organicLighting(n, viewDir, albedo, vTranslucency, 0.55);
+  lit -= albedo * uSunColor * uSunIntensity * clamp(dot(n, uSunDir), 0.0, 1.0)
+       * (1.0 - shade) * 0.90;
+  lit *= mix(1.0, 0.88, 1.0 - shade);
 
   // --- Rim ---------------------------------------------------------------------
   float rim = rimTerm(n, viewDir, 2.4);

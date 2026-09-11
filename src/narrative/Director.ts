@@ -11,7 +11,7 @@ import type { SecretTree } from '../world/SecretTree';
 import type { Overlay } from '../ui/Overlay';
 import { wait } from '../ui/Overlay';
 import { GENESIS, AWAKEN, REVEAL, FINAL_LINES, SECRET_ENDING_LINES } from './CodePoem';
-import { LANDMARKS, TREE, POND } from '../world/Landmarks';
+import { LANDMARKS, TREE, POND, landmarkById } from '../world/Landmarks';
 import { bus } from '../core/Bus';
 import { clamp01, easeInOutCubic, easeOutCubic, lerp } from '../core/MathUtils';
 
@@ -39,6 +39,10 @@ export class Director {
   act: Act = 'genesis';
   /** Incremented on replay; every await checks it and bails if it changed. */
   private generation = 0;
+  /** Slot index of THE FIRST TULIP, the one the whole sequence is about. */
+  firstTulip = -1;
+  /** Slot index of the flower hidden on the tree. */
+  treeTulip = -1;
   /** 0..1 how far the awakening has spread, in world units. */
   private spawnRadius = -1;
   private spawnTarget = -1;
@@ -115,6 +119,7 @@ export class Director {
     this.dancer.revealTarget = 0;
     this.camera.scripted = true;
     this.camera.cut('genesis', true);
+    this.world.setVoid(true);
     this.engine.post.uFadeAmount.value = 1;
     this.ui.clearCode();
     this.ui.showCode(true);
@@ -122,11 +127,22 @@ export class Director {
 
     if (!(await this.hold(900))) return;
 
+    // Threads of light draw themselves through the dark first, weaving the cage
+    // the flower will grow inside. Nothing else exists yet.
+    this.world.filaments.begin(0, 0, 0, 1.0);
+
+    // The one flower that matters. It starts as nothing and is grown, rather
+    // than faded in.
+    this.firstTulip = this.world.hero.spawn({
+      x: 0, z: 0, scale: 0.85, open: 0, glow: 0, core: 1, rotY: 0.4,
+    });
+    const first = this.world.hero.get(this.firstTulip);
+    if (first) { first.revealTarget = 0; first.glowTarget = 0; }
+
     // The code writes itself, one line at a time, before anything exists.
     for (let i = 0; i < GENESIS.length; i++) {
       if (!alive()) return;
       this.ui.addCodeLine(GENESIS[i]);
-      // Blank lines and comments land quickly; instructions take a beat.
       const line = GENESIS[i];
       const isPause = line.length === 0 || line[0][0] === 'comment';
       if (!(await this.hold(isPause ? 620 : 300 + Math.random() * 260))) return;
@@ -138,26 +154,37 @@ export class Director {
         this.ui.showCode(false);   // the code slides aside; the world is arriving
         this.camera.cut('firstTulip');
       }
-      if (i === 15) this.spread(0.55, 3.0);      // the stem
-      if (i === 16) this.spread(0.9, 2.0);       // the leaves
+      // root.enter(soil) / stem.rise / leaf.unfold -> the flower assembles.
+      if (i === 15 && first) { first.revealTarget = 0.45; first.glowTarget = 0.22; }
+      if (i === 16 && first) first.revealTarget = 0.75;
+      if (i === 17 && first) first.revealTarget = 1.0;
+      if (i === 15) this.spread(0.55, 3.0);
+      if (i === 16) this.spread(0.9, 2.0);
       if (i === 18) {
         this.engine.post.uFadeAmount.value = 0.28;
         this.spread(1.4, 2.5);
+        if (first) first.glowTarget = 0.45;
       }
       // "// silence"
       if (i === 20 && !(await this.hold(1600))) return;
-      // The three petals.
+      // The three petals, one at a time.
       if (i >= 22 && i <= 24) {
-        this.world.openBias = (i - 21) * 0.3;
-        if (!(await this.hold(500))) return;
+        if (first) first.openTarget = (i - 21) * 0.26;
+        this.world.openBias = (i - 21) * 0.18;
+        if (!(await this.hold(700))) return;
       }
       if (i === 25) {
+        if (first) { first.openTarget = 1.0; first.glowTarget = 1.0; }
         this.world.openBias = 1;
         this.engine.post.uFadeAmount.value = 0.1;
+        // The cage has done its work.
+        this.world.filaments.dismiss();
       }
     }
 
     if (!alive()) return;
+    // The ground arrives with the pulse that travels through it.
+    this.world.setVoid(false);
     this.engine.post.uFadeAmount.value = 0;
     // A pulse travels through the ground, and the world wakes up.
     bus.emit('garden:bloom', { x: 0, z: 0, radius: 6, power: 1 });
@@ -208,6 +235,12 @@ export class Director {
     this.camera.cut('wide');
     this.world.openBias = 0;
 
+    // Scatter a few of the luminous ones where the field already placed its
+    // rarest flowers, plus the handful in the Little Tulip Garden that the
+    // brief describes as exceptionally beautiful. They are meant to be found,
+    // not pointed at, so nothing announces them.
+    this.seedMagicalTulips();
+
     // Repeat visitors have already met the field; give them less preamble.
     const visits = this.memory.data.visits;
     const livingSeconds = visits <= 1 ? 210 : Math.max(120, 210 - visits * 16);
@@ -244,7 +277,18 @@ export class Director {
     this.dancer.walkTarget = null;
     this.dancer.setState('look');
     this.memory.discover('tree', 'The Tree That Was Always There');
-    if (!(await this.hold(9000))) return;
+
+    // One flower on a hidden branch, unlike every other flower in the world.
+    if (this.treeTulip < 0) {
+      const p = this.tree.firstTulipPos;
+      this.treeTulip = this.world.hero.spawn({
+        x: p.x, z: p.z, y: p.y - 0.55, scale: 0.6, open: 0.2, glow: 0.15, core: 1,
+      });
+    }
+    if (!(await this.hold(5000))) return;
+    const treeSlot = this.world.hero.get(this.treeTulip);
+    if (treeSlot) { treeSlot.openTarget = 1; treeSlot.glowTarget = 1; }
+    if (!(await this.hold(4000))) return;
 
     this.dancer.setState('skyward');
     if (!(await this.hold(6000))) return;
@@ -343,6 +387,46 @@ export class Director {
     void this.run();
   }
 
+  /**
+   * Place the rare luminous flowers. Their positions come from the field's own
+   * magical-kind records, so they sit exactly where the procedural placement
+   * already decided something special should grow.
+   */
+  private seedMagicalTulips(): void {
+    const rare = this.world.tulips.records.filter((r) => r.kind === 4 /* Magical */);
+    // A budget, not a count: however many the field generated, only a few of
+    // them become the expensive flower.
+    const budget = Math.min(6, Math.max(3, Math.floor(this.memory.growth * 4) + 3));
+    const little = landmarkById('little');
+
+    let placed = 0;
+    for (let i = 0; i < rare.length && placed < budget; i += Math.max(1, Math.floor(rare.length / budget))) {
+      const r = rare[i];
+      this.world.hero.spawn({
+        x: r.x, z: r.z, y: r.y, scale: 0.55 + (r.scale - 0.5) * 0.5,
+        open: 0.7 + Math.random() * 0.3,
+        glow: 0.55 + Math.random() * 0.35,
+        core: 0.7,
+        hueShift: (Math.random() - 0.5) * 0.08,
+      });
+      placed++;
+    }
+
+    // The Little Tulip Garden: a few exceptional ones, close together.
+    if (little) {
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2 + 0.7;
+        const rr = 2.2 + Math.random() * 3;
+        this.world.hero.spawn({
+          x: little.x + Math.cos(a) * rr,
+          z: little.z + Math.sin(a) * rr,
+          scale: 0.62, open: 0.85, glow: 0.7, core: 0.85,
+          hueShift: (Math.random() - 0.5) * 0.05,
+        });
+      }
+    }
+  }
+
   /** The alternate ending, for a visitor who found enough (brief §42). */
   private async secretEnding(): Promise<void> {
     const g = this.generation;
@@ -404,6 +488,7 @@ export class Director {
     this.reverse = 0;
     this.dreaming = false;
     this.dream = 0;
+    this.world.setVoid(false);
     this.spawnRadius = 900;
     this.spawnTarget = 900;
     this.world.setSpawn(0, 0, 900, 26);
@@ -412,6 +497,11 @@ export class Director {
     this.world.uniforms.wave.uWave2Strength.value = 0;
     this.dancer.revealTarget = 1;
     this.dancer.reveal = 1;
+    this.world.filaments.dismiss();
+    if (this.firstTulip < 0) {
+      this.firstTulip = this.world.hero.spawn({
+        x: 1.6, z: -1.1, scale: 0.85, open: 1, glow: 0.8, core: 1, instant: true });
+    }
     // Park her at the heart of the garden. Left to herself she wanders, which
     // is right for the experience and useless for a fixed reference frame.
     this.dancer.position.set(0, 0, 0);
@@ -437,6 +527,11 @@ export class Director {
     this.stillness = 0;
     this.dreaming = false;
     this.camera.focusPoint = null;
+    this.firstTulip = -1;
+    this.treeTulip = -1;
+    this.world.setVoid(false);
+    for (const slot of this.world.hero.slots) slot.active = false;
+    this.world.filaments.dismiss();
     (this.engine.post.uFadeColor.value as THREE.Color).setRGB(0, 0, 0);
     this.ui.setBlackout(false);
     void this.run();

@@ -287,18 +287,21 @@ export class CameraDirector {
 
     switch (this.shot.name) {
       case 'genesis': {
-        // Locked close on nothing at all, waiting.
-        P.set(0.35, 0.30, 0.85);
-        T.set(0, 0.16, 0);
+        // Locked on the empty air where the flower is about to be, framed as
+        // though it were already there.
+        P.set(0.34, 0.86, 1.00);
+        T.set(0, 0.70, 0);
         break;
       }
 
       case 'firstTulip': {
-        // Slowly circling the first flower as it opens.
+        // Slowly circling the first flower as it grows and opens, rising a
+        // little to follow the bloom up the stem.
         const a = elapsed * 0.13;
-        const r = lerp(1.05, 0.7, clamp01(t / 22));
-        P.set(Math.sin(a) * r, lerp(0.10, 0.34, clamp01(t / 18)), Math.cos(a) * r);
-        T.set(0, lerp(0.05, 0.26, clamp01(t / 18)), 0);
+        const k = clamp01(t / 20);
+        const r = lerp(1.45, 0.92, k);
+        P.set(Math.sin(a) * r, lerp(0.55, 0.98, k), Math.cos(a) * r);
+        T.set(0, lerp(0.32, 0.80, k), 0);
         break;
       }
 

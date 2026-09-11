@@ -5,6 +5,7 @@ import type { QualitySettings } from '../core/Quality';
 import type { TulipField } from '../world/TulipField';
 import { terrainHeight } from '../world/Terrain';
 import { srgb } from '../core/Colors';
+import { SHADOW_LAYER } from '../core/SunShadow';
 import { bus } from '../core/Bus';
 import {
   J, type Pose, newPose, evaluatePose, blendPose, addVariation,
@@ -346,6 +347,9 @@ export class Dancer {
     });
 
     this.mesh.material = this.material;
+    // She is the one thing in the world whose missing shadow is obvious, so she
+    // is the one thing that casts.
+    this.mesh.layers.enable(SHADOW_LAYER);
     this.group.add(this.mesh);
     this.group.name = 'Dancer';
 

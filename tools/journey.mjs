@@ -33,6 +33,9 @@ const errors = [];
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
 
+// Start from a clean slate: a previous run's saved hour or tier would
+// otherwise leak into this one.
+await page.addInitScript(() => { try { localStorage.clear(); } catch { /* ignore */ } });
 await page.goto(BASE, { waitUntil: 'load', timeout: 60000 });
 await page.waitForTimeout(5000);
 

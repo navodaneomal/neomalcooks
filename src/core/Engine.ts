@@ -4,7 +4,9 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { FinalShader } from '../shaders/FinalPass';
+import { FxaaShader } from '../shaders/FxaaPass';
 import { Quality } from './Quality';
+import { SunShadow } from './SunShadow';
 import { clamp } from './MathUtils';
 
 export type Updatable = (dt: number, elapsed: number) => void;
@@ -26,17 +28,53 @@ export class Engine {
   readonly renderPass: RenderPass;
   readonly bloomPass: UnrealBloomPass | null;
   readonly finalPass: ShaderPass;
+  readonly fxaaPass: ShaderPass;
   readonly quality: Quality;
   readonly clock = new THREE.Clock();
+  readonly shadow: SunShadow;
 
   /** Seconds of simulated time since the world woke up. */
   elapsed = 0;
   /** False on the performance tier, where the DOF taps are not affordable. */
   dofAvailable = true;
+
+  /**
+   * Dynamic resolution.
+   *
+   * The single most effective thing that can be done for a weak phone: when
+   * frames start costing too much, render fewer pixels and let the FXAA pass
+   * resolve the result back up. Nothing about the world changes — no flowers
+   * disappear, no draw distance shortens — so the experience degrades in the
+   * one dimension a viewer is least likely to notice while they are looking at
+   * a field move in the wind.
+   *
+   * Quantised to discrete steps and rate-limited, because every change
+   * reallocates the render targets, and a scale that chases the frame time
+   * continuously costs more than it saves.
+   */
+  renderScale = 1;
+  private scaleTarget = 1;
+  private frameSamples: number[] = [];
+  private scaleCooldown = 0;
+  private targetFrameTime = 1 / 55;
+  /** Set false to pin the resolution (the settings panel exposes this). */
+  adaptiveResolution = true;
+  private minScale = 0.55;
   /** Set false to freeze simulation while keeping the last frame on screen. */
   running = true;
 
-  private depthTexture: THREE.DepthTexture;
+  /**
+   * One depth texture per ping-pong buffer.
+   *
+   * The grading pass samples scene depth for its depth of field. It also writes
+   * into one of these buffers — and sampling a texture that is attached to the
+   * currently bound framebuffer is a feedback loop, which drivers are entitled
+   * to resolve as black, and do. Giving each buffer its own depth attachment
+   * and always sampling the *read* buffer's means the pass never reads what it
+   * is writing.
+   */
+  private depthTextureA: THREE.DepthTexture;
+  private depthTextureB: THREE.DepthTexture;
   private updates: Updatable[] = [];
   private lateUpdates: Updatable[] = [];
   private rafId = 0;
@@ -84,25 +122,28 @@ export class Engine {
 
     // --- Post stack --------------------------------------------------------
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
-    this.depthTexture = new THREE.DepthTexture(size.x, size.y);
-    this.depthTexture.type = THREE.UnsignedIntType;
-    this.depthTexture.format = THREE.DepthFormat;
-    this.depthTexture.minFilter = THREE.NearestFilter;
-    this.depthTexture.magFilter = THREE.NearestFilter;
+    const makeDepth = (): THREE.DepthTexture => {
+      const d = new THREE.DepthTexture(size.x, size.y);
+      d.type = THREE.UnsignedIntType;
+      d.format = THREE.DepthFormat;
+      d.minFilter = THREE.NearestFilter;
+      d.magFilter = THREE.NearestFilter;
+      return d;
+    };
+    this.depthTextureA = makeDepth();
+    this.depthTextureB = makeDepth();
 
     const target = new THREE.WebGLRenderTarget(size.x, size.y, {
       type: THREE.HalfFloatType,
       depthBuffer: true,
-      depthTexture: this.depthTexture,
+      depthTexture: this.depthTextureA,
       samples: 0,
     });
 
     this.composer = new EffectComposer(this.renderer, target);
     this.composer.setPixelRatio(this.effectivePixelRatio());
-    // Both ping-pong buffers share one depth attachment: only RenderPass ever
-    // writes depth, so the grading pass always reads valid scene depth.
     this.composer.renderTarget2.depthBuffer = true;
-    this.composer.renderTarget2.depthTexture = this.depthTexture;
+    this.composer.renderTarget2.depthTexture = this.depthTextureB;
 
     this.renderPass = new RenderPass(this.scene, this.camera);
     this.composer.addPass(this.renderPass);
@@ -120,10 +161,12 @@ export class Engine {
     }
 
     this.finalPass = new ShaderPass(FinalShader);
-    this.finalPass.renderToScreen = true;
+    // No longer the last pass: FXAA resolves to screen, and it has to run on
+    // the graded sRGB image rather than on linear HDR.
+    this.finalPass.renderToScreen = false;
     this.finalPass.material.depthTest = false;
     this.finalPass.material.depthWrite = false;
-    this.finalPass.uniforms.tDepth.value = this.depthTexture;
+    this.finalPass.uniforms.tDepth.value = this.depthTextureA;
     this.finalPass.uniforms.uNear.value = this.camera.near;
     this.finalPass.uniforms.uFar.value = this.camera.far;
     this.finalPass.uniforms.uResolution.value.set(size.x, size.y);
@@ -132,7 +175,19 @@ export class Engine {
     // blurs the whole field the moment the camera is anywhere but mid-distance.
     this.finalPass.uniforms.uDofStrength.value = 0;
     this.dofAvailable = quality.settings.tier !== 'performance';
+    this.targetFrameTime = quality.settings.tier === 'performance' ? 1 / 40
+      : quality.settings.tier === 'beautiful' ? 1 / 50 : 1 / 55;
+    this.minScale = quality.settings.tier === 'performance' ? 0.45 : 0.6;
     this.composer.addPass(this.finalPass);
+
+    this.fxaaPass = new ShaderPass(FxaaShader);
+    this.fxaaPass.renderToScreen = true;
+    this.fxaaPass.material.depthTest = false;
+    this.fxaaPass.material.depthWrite = false;
+    this.fxaaPass.uniforms.uEnabled.value = 1;
+    this.composer.addPass(this.fxaaPass);
+
+    this.shadow = new SunShadow(quality);
 
     this.bindEvents();
   }
@@ -148,8 +203,13 @@ export class Engine {
    */
   applyQuality(): void {
     const s = this.quality.settings;
+    // A weaker tier is also a weaker device: aim for a lower framerate there
+    // rather than shrinking the image to hit a number it was never going to.
+    this.targetFrameTime = s.tier === 'performance' ? 1 / 40 : s.tier === 'beautiful' ? 1 / 50 : 1 / 55;
+    this.minScale = s.tier === 'performance' ? 0.45 : 0.6;
     this.renderer.setPixelRatio(this.effectivePixelRatio());
     this.renderer.shadowMap.enabled = s.shadows;
+    this.shadow.applyTier(this.quality);
     if (this.bloomPass) {
       this.bloomPass.enabled = s.bloom;
       this.bloomPass.strength = s.bloomStrength;
@@ -163,7 +223,47 @@ export class Engine {
   }
 
   private effectivePixelRatio(): number {
-    return Math.min(window.devicePixelRatio || 1, this.quality.settings.maxPixelRatio);
+    const base = Math.min(window.devicePixelRatio || 1, this.quality.settings.maxPixelRatio);
+    return Math.max(0.4, base * this.renderScale);
+  }
+
+  /**
+   * Watch the frame time and move the render scale to match.
+   *
+   * Uses a median rather than a mean: one stalled frame from a garbage
+   * collection or a shader compile should not drop the resolution for everyone.
+   */
+  private updateRenderScale(dt: number, raw: number): void {
+    if (!this.adaptiveResolution) return;
+
+    this.frameSamples.push(raw);
+    if (this.frameSamples.length > 40) this.frameSamples.shift();
+    this.scaleCooldown -= dt;
+    if (this.scaleCooldown > 0 || this.frameSamples.length < 20) return;
+
+    const sorted = this.frameSamples.slice().sort((a, b) => a - b);
+    const median = sorted[sorted.length >> 1];
+
+    const step = 0.1;
+    let next = this.scaleTarget;
+    if (median > this.targetFrameTime * 1.18) {
+      next = Math.max(this.minScale, this.scaleTarget - step);
+    } else if (median < this.targetFrameTime * 0.72) {
+      // Climb back more slowly than we fall, so a scene that is only just
+      // affordable does not oscillate.
+      next = Math.min(1, this.scaleTarget + step * 0.5);
+    }
+
+    if (Math.abs(next - this.scaleTarget) > 0.001) {
+      this.scaleTarget = next;
+      this.renderScale = next;
+      this.scaleCooldown = 1.1;
+      this.frameSamples.length = 0;
+      this.lastW = 0;      // force the resize path to re-apply
+      this.handleResize();
+    } else {
+      this.scaleCooldown = 0.4;
+    }
   }
 
   onUpdate(fn: Updatable): void {
@@ -235,12 +335,15 @@ export class Engine {
     this.composer.setSize(w, h);
 
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
-    this.depthTexture.image.width = size.x;
-    this.depthTexture.image.height = size.y;
-    this.depthTexture.needsUpdate = true;
+    for (const d of [this.depthTextureA, this.depthTextureB]) {
+      d.image.width = size.x;
+      d.image.height = size.y;
+      d.needsUpdate = true;
+    }
 
     this.bloomPass?.setSize(w, h);
     this.finalPass.uniforms.uResolution.value.set(size.x, size.y);
+    this.fxaaPass.uniforms.uTexel.value.set(1 / size.x, 1 / size.y);
   };
 
   start(): void {
@@ -270,12 +373,26 @@ export class Engine {
       for (let i = 0; i < this.lateUpdates.length; i++) this.lateUpdates[i](dt, this.elapsed);
     }
 
+    // The shadow map is filled before the world is drawn, so the same frame's
+    // geometry and its shadow always agree.
+    if (this.shadow.enabled) this.shadow.render(this.renderer, this.scene);
+
     this.finalPass.uniforms.uTime.value = this.elapsed;
     this.finalPass.uniforms.uNear.value = this.camera.near;
     this.finalPass.uniforms.uFar.value = this.camera.far;
 
+    // The scene is about to be drawn into whichever buffer is currently the
+    // read buffer, so that is the depth the grading pass must sample. The pair
+    // alternates from frame to frame once a swapping pass is in the chain, so
+    // this cannot be decided once at construction.
+    const readTarget = this.composer.readBuffer as THREE.WebGLRenderTarget;
+    if (readTarget?.depthTexture) {
+      this.finalPass.uniforms.tDepth.value = readTarget.depthTexture;
+    }
+
     this.composer.render(dt);
     this.quality.sampleFrame(raw);
+    this.updateRenderScale(dt, raw);
   }
 
   dispose(): void {
@@ -286,6 +403,9 @@ export class Engine {
     document.removeEventListener('visibilitychange', this.handleVisibility);
     window.visualViewport?.removeEventListener('resize', this.handleResize);
     this.resizeObserver?.disconnect();
+    this.shadow.dispose();
+    this.depthTextureA.dispose();
+    this.depthTextureB.dispose();
     this.composer.dispose();
     this.renderer.dispose();
   }

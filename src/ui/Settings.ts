@@ -3,6 +3,7 @@ import type { AudioEngine } from '../systems/Audio';
 import type { Memory } from '../systems/Memory';
 import type { DayCycle } from '../systems/DayCycle';
 import type { World } from '../world/World';
+import type { Engine } from '../core/Engine';
 import type { Heart } from '../systems/Heart';
 import type { Weather } from '../systems/Weather';
 import { bus } from '../core/Bus';
@@ -32,6 +33,7 @@ export class Settings {
   constructor(
     parent: HTMLElement,
     private quality: Quality,
+    private engine: Engine,
     private audio: AudioEngine,
     private memory: Memory,
     private day: DayCycle,
@@ -248,8 +250,35 @@ export class Settings {
       this.memory.setPref('tier', select.value);
     });
     tierRow.appendChild(select);
+
+    // Resolution adapts to hold a framerate. Worth exposing, because someone on
+    // a big screen may prefer a sharp image at a lower framerate.
+    this.toggleRow(perf, 'Adapt resolution', this.engine.adaptiveResolution, (v) => {
+      this.engine.adaptiveResolution = v;
+      if (!v) {
+        this.engine.renderScale = 1;
+        this.engine.applyQuality();
+      }
+    });
+
+    this.toggleRow(perf, 'Smooth edges', true, (v) => {
+      this.engine.fxaaPass.uniforms.uEnabled.value = v ? 1 : 0;
+    });
+
+    // Only offered where it can actually be afforded, which is a property of
+    // the tier — and the tier can change under us, so the row comes and goes.
+    const shadowInput = this.toggleRow(perf, 'Shadows', this.engine.shadow.enabled,
+      (v) => this.engine.shadow.setEnabled(v));
+    const shadowRow = shadowInput.parentElement as HTMLElement;
+    const syncShadowRow = (): void => {
+      shadowRow.hidden = !this.engine.shadow.available;
+      shadowInput.checked = this.engine.shadow.enabled;
+    };
+    syncShadowRow();
+
     bus.on('quality:change', ({ tier }) => {
       select.value = tier;
+      syncShadowRow();
     });
 
     // --- Memory --------------------------------------------------------------
@@ -285,8 +314,9 @@ export class Settings {
     if (!this.open) return;
     const stats = this.world.tulips.stats();
     const lod = this.world.tulips.lodCounts();
+    const scale = Math.round(this.engine.renderScale * 100);
     this.diagnostics.textContent =
-      `${Math.round(fps)} fps · ${stats.tulips.toLocaleString()} tulips · ` +
+      `${Math.round(fps)} fps · ${scale}% res · ${stats.tulips.toLocaleString()} tulips · ` +
       `${stats.chunks} chunks (${lod.high}/${lod.mid}/${lod.low}) · ` +
       `${this.day.label()} · ${this.weather.label()} · ${this.heart.label()}` +
       (this.audio.ready ? '' : ' · silent');

@@ -84,6 +84,18 @@ export class WorldUniforms {
     uInfluenceCount: { value: 0 },
   };
 
+  /**
+   * The sun shadow. Shared by every receiving surface so the map, the matrix
+   * and the strength can never disagree between ground, grass and flowers.
+   */
+  readonly shadow: UniformMap = {
+    uShadowMap: { value: null },
+    uShadowMatrix: { value: new THREE.Matrix4() },
+    uShadowEnabled: { value: 0 },
+    uShadowTexel: { value: 1 / 1024 },
+    uShadowStrength: { value: 0.85 },
+  };
+
   /** Global quality/adaptive knobs a shader may want (LOD fades, density). */
   readonly quality: UniformMap = {
     uDetail: { value: 1 },      // 0..1, scales shader-side extra work
@@ -110,6 +122,7 @@ export class WorldUniforms {
       this.wave,
       this.influence,
       this.quality,
+      this.shadow,
       extra,
     );
   }

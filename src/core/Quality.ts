@@ -42,6 +42,15 @@ export interface QualitySettings {
   petalSegments: number;
   /** Extra shader work multiplier, fed to uDetail. */
   detail: number;
+  /**
+   * Distance at which chunks drop to mid, then to low detail.
+   *
+   * This scene is vertex-bound rather than fill-bound — a tulip is a lot of
+   * trigonometry per vertex and there are a great many of them — so on a weak
+   * device pulling these in is worth far more than reducing resolution.
+   */
+  lodNear: number;
+  lodFar: number;
   anisotropy: number;
 }
 
@@ -67,6 +76,8 @@ const TIERS: Record<TierName, QualitySettings> = {
     butterflies: 26,
     petalSegments: 5,
     detail: 1,
+    lodNear: 38,
+    lodFar: 95,
     anisotropy: 8,
   },
   beautiful: {
@@ -90,6 +101,8 @@ const TIERS: Record<TierName, QualitySettings> = {
     butterflies: 16,
     petalSegments: 4,
     detail: 0.65,
+    lodNear: 28,
+    lodFar: 68,
     anisotropy: 4,
   },
   performance: {
@@ -113,6 +126,8 @@ const TIERS: Record<TierName, QualitySettings> = {
     butterflies: 8,
     petalSegments: 3,
     detail: 0.3,
+    lodNear: 16,
+    lodFar: 38,
     anisotropy: 1,
   },
 };
@@ -221,7 +236,10 @@ export class Quality {
     // Below ~28fps sustained is where the experience stops feeling cinematic.
     if (avg > 1 / 28) {
       this.strikes++;
-      if (this.strikes >= 3) {
+      // A device that is *far* over budget was misjudged at startup, not
+      // momentarily busy: drop immediately rather than making them wait.
+      const desperate = avg > 1 / 12;
+      if (this.strikes >= (desperate ? 1 : 3)) {
         this.strikes = 0;
         if (this.settings.tier === 'cinematic') this.setTier('beautiful', false);
         else if (this.settings.tier === 'beautiful') this.setTier('performance', false);

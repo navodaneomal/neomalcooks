@@ -12,6 +12,8 @@ import { SecretTree } from './SecretTree';
 import { Wildlife } from './Wildlife';
 import { Fireflies } from './Fireflies';
 import { Meteors } from './Meteors';
+import { HeroTulip } from './HeroTulip';
+import { Filaments } from './Filaments';
 import { paletteUniformArrays } from './Palette';
 import { bus } from '../core/Bus';
 
@@ -52,6 +54,8 @@ export class World {
   wildlife!: Wildlife;
   fireflies!: Fireflies;
   meteors!: Meteors;
+  hero!: HeroTulip;
+  filaments!: Filaments;
 
   private engine: Engine;
   private quality: Quality;
@@ -84,12 +88,16 @@ export class World {
     this.wildlife = new Wildlife(this.uniforms, s, this.tulips, this.seed ^ 0x55);
     this.fireflies = new Fireflies(this.uniforms, s, this.seed ^ 0x66);
     this.meteors = new Meteors(this.uniforms, s.tier === 'performance' ? 4 : 7, this.seed ^ 0x77);
+    this.hero = new HeroTulip(this.uniforms, s, s.tier === 'performance' ? 10 : 24);
+    this.filaments = new Filaments(this.uniforms, s.tier === 'performance' ? 12 : 20,
+      s.tier === 'performance' ? 44 : 80, this.seed ^ 0x88);
 
     this.content.add(
       this.sky.mesh, this.ground.mesh, this.tulips.group, this.grass.mesh,
       this.pond.mesh, this.tree.group, this.wildlife.mesh,
       this.motes.points, this.petals.mesh, this.rain.mesh,
       this.fireflies.points, this.meteors.mesh,
+      this.hero.group, this.filaments.mesh,
     );
 
     this.uniforms.quality.uDetail.value = s.detail;
@@ -179,6 +187,24 @@ export class World {
     return this.spawnRadius;
   }
 
+  /**
+   * The void.
+   *
+   * Before the awakening there is no world — so the sky and the ground are not
+   * dimmed, they are absent. Fading them out instead would leave a lit daytime
+   * field sitting behind the opening sequence, visible the moment the fade
+   * lifts, which rather undercuts "begin with black".
+   */
+  setVoid(on: boolean): void {
+    this.sky.mesh.visible = !on;
+    this.ground.mesh.visible = !on;
+    this.pond.mesh.visible = !on;
+    this.tree.group.visible = !on;
+    this.fireflies.points.visible = !on;
+    this.meteors.mesh.visible = !on;
+    this.motes.material.uniforms.uAmount.value = on ? 0.25 : 1;
+  }
+
   /** Global visibility of the drifting air, dimmed during the quiet beats. */
   setAirAmount(motes: number, petals: number): void {
     this.motes.material.uniforms.uAmount.value = motes;
@@ -210,6 +236,8 @@ export class World {
     this.fireflies.setPixelRatio(ctx.pixelRatio);
     this.fireflies.update(dt, camera, ctx.night);
     this.meteors.update(dt, camera, ctx.night);
+    this.hero.update(dt);
+    this.filaments.update(dt);
   }
 
   private disposeParts(): void {
@@ -225,6 +253,8 @@ export class World {
     this.wildlife.dispose();
     this.fireflies.dispose();
     this.meteors.dispose();
+    this.hero.dispose();
+    this.filaments.dispose();
   }
 
   dispose(): void {
